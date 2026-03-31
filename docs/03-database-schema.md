@@ -1,0 +1,111 @@
+# 3. Схема данных БД (MVP)
+
+Ниже актуальная модель PostgreSQL для обновленного набора таблиц.
+
+## 3.1 Минимальные таблицы
+
+1. `users` - пользователь Telegram + поля анкеты (возраст, пол, город, гео, полнота).
+2. `user_photos` - фото пользователя.
+3. `user_preferences` - первичные предпочтения.
+4. `user_actions` - like/skip/block.
+5. `matches` - взаимные лайки.
+
+## 3.2 ER (упрощенно)
+
+```mermaid
+erDiagram
+    users ||--o{ user_photos : uploads
+    users ||--|| user_preferences : sets
+    users ||--o{ user_actions : does
+    users ||--o{ matches : part_of
+```
+
+## 3.3 DDL (обновлено)
+
+Актуальная версия также вынесена в `db/schema.sql`.
+
+```sql
+create table users (
+    id bigserial primary key,
+    telegram_id bigint not null unique,
+    username text,
+    first_name text,
+    last_name text,
+    birth_date date not null,
+    gender text not null check (gender in ('male', 'female', 'other')),
+    bio text,
+    city text not null,
+    latitude numeric(9,6),
+    longitude numeric(9,6),
+    profile_completeness numeric(5,2) not null default 0
+        check (profile_completeness between 0 and 100),
+    status text not null default 'active'
+        check (status in ('active', 'paused', 'banned')),
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+create table user_photos (
+    id bigserial primary key,
+    user_id bigint not null references users(id) on delete cascade,
+    telegram_file_id text not null,
+    telegram_file_unique_id text not null unique,
+    position smallint not null default 1 check (position between 1 and 10),
+    is_primary boolean not null default false,
+    is_active boolean not null default true,
+    created_at timestamptz not null default now()
+);
+
+create unique index uq_user_photos_primary_per_user
+on user_photos(user_id)
+where is_primary and is_active;
+
+create table user_preferences (
+    user_id bigint primary key references users(id) on delete cascade,
+    age_min smallint not null check (age_min between 18 and 99),
+    age_max smallint not null check (age_max between 18 and 99 and age_max >= age_min),
+    preferred_gender text not null check (preferred_gender in ('male', 'female', 'any')),
+    preferred_city text not null,
+    max_distance_km int check (max_distance_km between 1 and 500),
+    updated_at timestamptz not null default now()
+);
+
+create table user_actions (
+    actor_user_id bigint not null references users(id) on delete cascade,
+    target_user_id bigint not null references users(id) on delete cascade,
+    action_type text not null check (action_type in ('like', 'skip', 'block')),
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    primary key (actor_user_id, target_user_id),
+    check (actor_user_id <> target_user_id)
+);
+
+create table matches (
+    id bigserial primary key,
+    user_a_id bigint not null references users(id) on delete cascade,
+    user_b_id bigint not null references users(id) on delete cascade,
+    created_at timestamptz not null default now(),
+    check (user_a_id <> user_b_id)
+);
+
+create unique index uq_matches_pair
+on matches (least(user_a_id, user_b_id), greatest(user_a_id, user_b_id));
+```
+
+## 3.4 Индексы для быстрого MVP
+
+```sql
+create index idx_users_city on users(city);
+create index idx_users_gender on users(gender);
+create index idx_users_birth_date on users(birth_date);
+create index idx_user_photos_user on user_photos(user_id);
+create index idx_user_actions_actor on user_actions(actor_user_id);
+create index idx_user_actions_target on user_actions(target_user_id);
+create index idx_user_actions_target_type on user_actions(target_user_id, action_type);
+```
+
+## 3.5 Полнота анкеты и фото
+
+- `profile_completeness` храним в `users`.
+- количество фото считаем как `count(*)` из `user_photos` по `user_id`.
+- при изменении анкеты/фото пересчитываем `profile_completeness`.
