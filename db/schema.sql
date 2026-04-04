@@ -29,10 +29,6 @@ create table user_photos (
     created_at timestamptz not null default now()
 );
 
-create unique index uq_user_photos_primary_per_user
-on user_photos(user_id)
-where is_primary and is_active;
-
 create table user_preferences (
     user_id bigint primary key references users(id) on delete cascade,
     age_min smallint not null check (age_min between 18 and 99),
@@ -60,14 +56,3 @@ create table matches (
     created_at timestamptz not null default now(),
     check (user_a_id <> user_b_id)
 );
-
-create unique index uq_matches_pair
-on matches (least(user_a_id, user_b_id), greatest(user_a_id, user_b_id));
-
-create index idx_users_city on users(city);
-create index idx_users_gender on users(gender);
-create index idx_users_birth_date on users(birth_date);
-create index idx_user_photos_user on user_photos(user_id);
-create index idx_user_actions_actor on user_actions(actor_user_id);
-create index idx_user_actions_target on user_actions(target_user_id);
-create index idx_user_actions_target_type on user_actions(target_user_id, action_type);
