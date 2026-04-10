@@ -1,13 +1,13 @@
-create table users (
+create table if not exists users (
     id bigserial primary key,
     telegram_id bigint not null unique,
     username text,
     first_name text,
     last_name text,
-    birth_date date not null,
-    gender text not null check (gender in ('male', 'female', 'other')),
+    birth_date date,
+    gender text check (gender in ('male', 'female', 'other')),
     bio text,
-    city text not null,
+    city text,
     latitude numeric(9,6),
     longitude numeric(9,6),
     profile_completeness numeric(5,2) not null default 0
@@ -18,7 +18,7 @@ create table users (
     updated_at timestamptz not null default now()
 );
 
-create table user_photos (
+create table if not exists user_photos (
     id bigserial primary key,
     user_id bigint not null references users(id) on delete cascade,
     telegram_file_id text not null,
@@ -29,7 +29,7 @@ create table user_photos (
     created_at timestamptz not null default now()
 );
 
-create table user_preferences (
+create table if not exists user_preferences (
     user_id bigint primary key references users(id) on delete cascade,
     age_min smallint not null check (age_min between 18 and 99),
     age_max smallint not null check (age_max between 18 and 99 and age_max >= age_min),
@@ -39,7 +39,7 @@ create table user_preferences (
     updated_at timestamptz not null default now()
 );
 
-create table user_actions (
+create table if not exists user_actions (
     actor_user_id bigint not null references users(id) on delete cascade,
     target_user_id bigint not null references users(id) on delete cascade,
     action_type text not null check (action_type in ('like', 'skip', 'block')),
@@ -49,10 +49,17 @@ create table user_actions (
     check (actor_user_id <> target_user_id)
 );
 
-create table matches (
+create table if not exists matches (
     id bigserial primary key,
     user_a_id bigint not null references users(id) on delete cascade,
     user_b_id bigint not null references users(id) on delete cascade,
     created_at timestamptz not null default now(),
     check (user_a_id <> user_b_id)
 );
+
+create unique index if not exists uq_matches_pair
+on matches (least(user_a_id, user_b_id), greatest(user_a_id, user_b_id));
+
+create index if not exists idx_users_telegram_id on users(telegram_id);
+create index if not exists idx_user_actions_actor on user_actions(actor_user_id);
+create index if not exists idx_user_actions_target on user_actions(target_user_id);
