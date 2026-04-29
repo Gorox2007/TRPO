@@ -4,14 +4,15 @@ import argparse
 import os
 import sys
 
-from stage2_bot.bot_service import TelegramBotService
-from stage2_bot.core import DatingCoreService
-from stage2_bot.db import DatabaseError, PostgresRepository
-from stage2_bot.telegram_api import TelegramApiError, TelegramClient
+from .bot_service import TelegramBotService
+from .cache import RecommendationCache
+from .core import DatingCoreService
+from .db import DatabaseError, PostgresRepository
+from .telegram_api import TelegramApiError, TelegramClient
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run Stage 2 Telegram Dating Bot.")
+    parser = argparse.ArgumentParser(description="Run Stage 3 Telegram Dating Bot.")
     parser.add_argument(
         "--token",
         default=os.getenv("TELEGRAM_BOT_TOKEN"),
@@ -33,6 +34,18 @@ def parse_args() -> argparse.Namespace:
         default=int(os.getenv("BOT_POLL_TIMEOUT", "25")),
         help="Telegram getUpdates timeout in seconds.",
     )
+    parser.add_argument(
+        "--cache-ttl",
+        type=int,
+        default=int(os.getenv("RECOMMENDATION_CACHE_TTL", "300")),
+        help="Recommendation cache TTL in seconds.",
+    )
+    parser.add_argument(
+        "--recommendation-batch-size",
+        type=int,
+        default=int(os.getenv("RECOMMENDATION_BATCH_SIZE", "10")),
+        help="How many ranked candidates to pre-cache per user.",
+    )
     return parser.parse_args()
 
 
@@ -50,10 +63,15 @@ def main() -> int:
         return 1
 
     tg = TelegramClient(token=args.token, timeout_sec=args.poll_timeout)
-    core = DatingCoreService(repo=repo)
+    cache = RecommendationCache(ttl_sec=args.cache_ttl)
+    core = DatingCoreService(
+        repo=repo,
+        cache=cache,
+        recommendation_batch_size=args.recommendation_batch_size,
+    )
     service = TelegramBotService(tg=tg, core=core)
 
-    print("Stage 2 bot is running. Press Ctrl+C to stop.")
+    print("Stage 3 bot is running. Press Ctrl+C to stop.")
     try:
         service.run_forever()
     except KeyboardInterrupt:
@@ -66,4 +84,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

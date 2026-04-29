@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 from dataclasses import dataclass
 from typing import Any
 from urllib import error, request
@@ -42,11 +43,13 @@ class TelegramClient:
             headers={"Content-Type": "application/json"},
         )
         try:
-            with request.urlopen(req, timeout=self.timeout_sec + 5) as resp:
+            with request.urlopen(req, timeout=max(self.timeout_sec + 20, 30)) as resp:
                 response = json.loads(resp.read().decode("utf-8"))
         except error.HTTPError as exc:
             raw_body = exc.read().decode("utf-8", errors="replace")
             raise TelegramApiError(f"HTTP {exc.code}: {raw_body}") from exc
+        except (TimeoutError, socket.timeout) as exc:
+            raise TelegramApiError("request timed out") from exc
         except error.URLError as exc:
             raise TelegramApiError(f"network error: {exc.reason}") from exc
         except json.JSONDecodeError as exc:
@@ -55,4 +58,3 @@ class TelegramClient:
         if not response.get("ok", False):
             raise TelegramApiError(str(response))
         return response
-

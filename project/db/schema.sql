@@ -14,9 +14,35 @@ create table if not exists users (
         check (profile_completeness between 0 and 100),
     status text not null default 'active'
         check (status in ('active', 'paused', 'banned')),
+    referral_code text,
+    referred_by_user_id bigint references users(id) on delete set null,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
+
+alter table users add column if not exists telegram_id bigint;
+alter table users add column if not exists username text;
+alter table users add column if not exists first_name text;
+alter table users add column if not exists last_name text;
+alter table users add column if not exists birth_date date;
+alter table users add column if not exists gender text;
+alter table users add column if not exists bio text;
+alter table users add column if not exists city text;
+alter table users add column if not exists latitude numeric(9,6);
+alter table users add column if not exists longitude numeric(9,6);
+alter table users add column if not exists profile_completeness numeric(5,2) not null default 0;
+alter table users add column if not exists status text not null default 'active';
+alter table users add column if not exists referral_code text;
+alter table users add column if not exists referred_by_user_id bigint references users(id) on delete set null;
+alter table users add column if not exists created_at timestamptz not null default now();
+alter table users add column if not exists updated_at timestamptz not null default now();
+alter table users alter column birth_date drop not null;
+alter table users alter column gender drop not null;
+alter table users alter column city drop not null;
+
+create unique index if not exists uq_users_telegram_id on users(telegram_id);
+create unique index if not exists uq_users_referral_code on users(referral_code) where referral_code is not null;
+create index if not exists idx_users_status on users(status);
 
 create table if not exists user_photos (
     id bigserial primary key,
@@ -28,6 +54,8 @@ create table if not exists user_photos (
     is_active boolean not null default true,
     created_at timestamptz not null default now()
 );
+
+create index if not exists idx_user_photos_user_id on user_photos(user_id);
 
 create table if not exists user_preferences (
     user_id bigint primary key references users(id) on delete cascade,
@@ -49,6 +77,12 @@ create table if not exists user_actions (
     check (actor_user_id <> target_user_id)
 );
 
+alter table user_actions add column if not exists updated_at timestamptz not null default now();
+
+create index if not exists idx_user_actions_actor on user_actions(actor_user_id);
+create index if not exists idx_user_actions_target on user_actions(target_user_id);
+create index if not exists idx_user_actions_target_type on user_actions(target_user_id, action_type);
+
 create table if not exists matches (
     id bigserial primary key,
     user_a_id bigint not null references users(id) on delete cascade,
@@ -60,6 +94,5 @@ create table if not exists matches (
 create unique index if not exists uq_matches_pair
 on matches (least(user_a_id, user_b_id), greatest(user_a_id, user_b_id));
 
-create index if not exists idx_users_telegram_id on users(telegram_id);
-create index if not exists idx_user_actions_actor on user_actions(actor_user_id);
-create index if not exists idx_user_actions_target on user_actions(target_user_id);
+create index if not exists idx_matches_user_a on matches(user_a_id);
+create index if not exists idx_matches_user_b on matches(user_b_id);

@@ -102,14 +102,3 @@ RabbitMQ в процессе нагрузки:
 
 ![RabbitMQ Overview](screenshots/01_brokers_up.png)
 
-Лог прогона:
-
-![Benchmark Run](screenshots/02_benchmark_run.png)
-
-Сводка результатов:
-
-![Summary](screenshots/03_results_summary.png)
-
-Финальный отчет:
-
-![Report](screenshots/04_readme_report.png)

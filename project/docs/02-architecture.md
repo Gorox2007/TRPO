@@ -31,17 +31,16 @@ sequenceDiagram
     B->>C: запрос кандидата для user_id
     C->>D: профиль + предпочтения + уже просмотренные
     D->>C: пул кандидатов по фильтрам
-    C->>C: score = prefs + completeness + photos + geo
+    C->>C: score = primary + behavior + referral
     C-->>B: лучший кандидат
     B-->>U: карточка кандидата
 ```
 
-## 2.4 Черновая формула скоринга
+## 2.4 Формула скоринга Этапа 3
 
-`total_score = 0.50 * geo_score + 0.25 * preference_score + 0.15 * completeness_score + 0.10 * photo_score`
+`total_score = 0.65 * primary_score + 0.30 * behavioral_score + 0.05 * referral_score`
 
 Где:
-- `preference_score`: совпадение по полу/возрасту;
-- `completeness_score`: полнота анкеты;
-- `photo_score`: нормализованный балл по количеству фото;
-- `geo_score`: близость по городу/координатам.
+- `primary_score`: возраст, пол, город, полнота анкеты и фото;
+- `behavioral_score`: лайки, пропуски и мэтчи;
+- `referral_score`: бонус за приглашенных пользователей.
