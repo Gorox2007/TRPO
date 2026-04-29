@@ -1,0 +1,17 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: broker-practice-rabbitmq
+    cpus: 1.0
+    mem_limit: 512m
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  redis:
+    image: redis:7
+    container_name: broker-practice-redis
+    cpus: 1.0
+    mem_limit: 512m
+    ports:
+      - "6379:6379"
