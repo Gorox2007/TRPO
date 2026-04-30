@@ -3,12 +3,17 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 
 from .bot_service import TelegramBotService
 from .cache import RecommendationCache
 from .core import DatingCoreService
 from .db import DatabaseError, PostgresRepository
 from .telegram_api import TelegramApiError, TelegramClient
+
+
+STARTUP_RETRY_COUNT = 3
+STARTUP_RETRY_DELAY_SEC = 2
 
 
 def parse_args() -> argparse.Namespace:
@@ -51,8 +56,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    if not args.token:
+    token = (args.token or "").strip()
+    if not token:
         print("Error: TELEGRAM_BOT_TOKEN is required.", file=sys.stderr)
+        return 2
+    if token == "your_bot_token":
+        print("Error: TELEGRAM_BOT_TOKEN is still set to placeholder 'your_bot_token'.", file=sys.stderr)
         return 2
 
     try:
@@ -62,7 +71,24 @@ def main() -> int:
         print(f"Database init error: {exc}", file=sys.stderr)
         return 1
 
-    tg = TelegramClient(token=args.token, timeout_sec=args.poll_timeout)
+    tg = TelegramClient(token=token, timeout_sec=args.poll_timeout)
+    try:
+        bot_info = _fetch_bot_info_with_retries(tg)
+    except KeyboardInterrupt:
+        print("\nBot startup cancelled.")
+        return 130
+    except TelegramApiError as exc:
+        if exc.status_code == 404:
+            print(
+                "Telegram auth error: Bot API returned 404 Not Found.\n"
+                "Usually this means TELEGRAM_BOT_TOKEN is invalid, truncated, or belongs to another bot.\n"
+                "Set the real token from BotFather and run again.",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"Telegram startup error: {exc}", file=sys.stderr)
+        return 1
+
     cache = RecommendationCache(ttl_sec=args.cache_ttl)
     core = DatingCoreService(
         repo=repo,
@@ -71,7 +97,8 @@ def main() -> int:
     )
     service = TelegramBotService(tg=tg, core=core)
 
-    print("Stage 3 bot is running. Press Ctrl+C to stop.")
+    username = bot_info.get("username") or "<unknown>"
+    print(f"Stage 3 bot is running as @{username}. Press Ctrl+C to stop.")
     try:
         service.run_forever()
     except KeyboardInterrupt:
@@ -80,6 +107,23 @@ def main() -> int:
     except TelegramApiError as exc:
         print(f"Telegram error: {exc}", file=sys.stderr)
         return 1
+
+def _fetch_bot_info_with_retries(tg: TelegramClient) -> dict[str, object]:
+    last_error: TelegramApiError | None = None
+    for attempt in range(1, STARTUP_RETRY_COUNT + 1):
+        try:
+            return tg.get_me()
+        except TelegramApiError as exc:
+            last_error = exc
+            if not exc.retriable or attempt == STARTUP_RETRY_COUNT:
+                break
+            print(
+                f"Telegram startup warning: {exc}. Retry {attempt}/{STARTUP_RETRY_COUNT} in {STARTUP_RETRY_DELAY_SEC} sec.",
+                file=sys.stderr,
+            )
+            time.sleep(STARTUP_RETRY_DELAY_SEC)
+    assert last_error is not None
+    raise last_error
 
 
 if __name__ == "__main__":

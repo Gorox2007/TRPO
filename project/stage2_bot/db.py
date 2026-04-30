@@ -23,7 +23,6 @@ class UserRecord:
     city: str | None
     profile_completeness: float
     status: str
-    referral_code: str | None
     photo_count: int
     created_at: str
     updated_at: str
@@ -53,7 +52,6 @@ class CandidateStats:
     likes_received: int
     skips_received: int
     matches_count: int
-    referrals_count: int
 
 
 @dataclass
@@ -84,44 +82,27 @@ class PostgresRepository:
         username: str | None,
         first_name: str | None,
         last_name: str | None,
-        referral_code: str | None = None,
     ) -> UserRecord:
-        own_referral_code = self._build_referral_code(telegram_id)
-        referrer_user_id = self._get_referrer_user_id(referral_code, telegram_id)
         query = """
         insert into users (
             telegram_id,
             username,
             first_name,
-            last_name,
-            referral_code,
-            referred_by_user_id
+            last_name
         )
-        values (%s, %s, %s, %s, %s, %s)
+        values (%s, %s, %s, %s)
         on conflict (telegram_id)
         do update set
             username = excluded.username,
             first_name = excluded.first_name,
             last_name = excluded.last_name,
-            referral_code = coalesce(users.referral_code, excluded.referral_code),
-            referred_by_user_id = coalesce(users.referred_by_user_id, excluded.referred_by_user_id),
             status = 'active',
             updated_at = now()
         returning id;
         """
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    query,
-                    (
-                        telegram_id,
-                        username,
-                        first_name,
-                        last_name,
-                        own_referral_code,
-                        referrer_user_id,
-                    ),
-                )
+                cur.execute(query, (telegram_id, username, first_name, last_name))
                 row = cur.fetchone()
             conn.commit()
         return self.get_user_by_id(int(row[0]))
@@ -338,6 +319,35 @@ class PostgresRepository:
             is_primary=bool(row[4]),
         )
 
+    def list_photos(self, user_id: int, limit: int = 10) -> list[PhotoRecord]:
+        query = """
+        select
+            id,
+            telegram_file_id,
+            telegram_file_unique_id,
+            position,
+            is_primary
+        from user_photos
+        where user_id = %s
+          and is_active = true
+        order by is_primary desc, position asc, id asc
+        limit %s;
+        """
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (user_id, limit))
+                rows = cur.fetchall()
+        return [
+            PhotoRecord(
+                id=int(row[0]),
+                telegram_file_id=str(row[1]),
+                telegram_file_unique_id=str(row[2]),
+                position=int(row[3]),
+                is_primary=bool(row[4]),
+            )
+            for row in rows
+        ]
+
     def list_candidates_for_user(self, viewer_user_id: int, limit: int = 200) -> list[CandidateStats]:
         query = f"""
         select
@@ -356,12 +366,7 @@ class PostgresRepository:
                 select count(*)
                 from matches m
                 where m.user_a_id = u.id or m.user_b_id = u.id
-            ), 0) as matches_count,
-            coalesce((
-                select count(*)
-                from users r
-                where r.referred_by_user_id = u.id
-            ), 0) as referrals_count
+            ), 0) as matches_count
         from users u
         where u.id <> %s
           and u.status = 'active'
@@ -394,7 +399,6 @@ class PostgresRepository:
                     likes_received=int(row[user_columns_count]),
                     skips_received=int(row[user_columns_count + 1]),
                     matches_count=int(row[user_columns_count + 2]),
-                    referrals_count=int(row[user_columns_count + 3]),
                 )
             )
         return stats
@@ -479,22 +483,6 @@ class PostgresRepository:
             conn.commit()
         return float(row[0])
 
-    def _get_referrer_user_id(self, referral_code: str | None, telegram_id: int) -> int | None:
-        if not referral_code:
-            return None
-        query = """
-        select id
-        from users
-        where referral_code = %s and telegram_id <> %s;
-        """
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(query, (referral_code, telegram_id))
-                row = cur.fetchone()
-        if row is None:
-            return None
-        return int(row[0])
-
     def _fetch_user(self, where_sql: str, params: tuple[Any, ...]) -> UserRecord | None:
         query = f"""
         select {self._user_select_columns("u")}
@@ -512,7 +500,7 @@ class PostgresRepository:
     def _connect(self) -> Any:
         try:
             return self._psycopg.connect(self.database_url)
-        except Exception as exc:  # pragma: no cover - depends on environment
+        except Exception as exc:
             raise DatabaseError(f"failed to connect to postgres: {exc}") from exc
 
     @staticmethod
@@ -524,10 +512,6 @@ class PostgresRepository:
                 "Install it with: pip install psycopg[binary]"
             )
         return importlib.import_module("psycopg")
-
-    @staticmethod
-    def _build_referral_code(telegram_id: int) -> str:
-        return f"tg{telegram_id:x}"
 
     @staticmethod
     def _row_to_preference(row: Any) -> PreferenceRecord:
@@ -553,7 +537,6 @@ class PostgresRepository:
             {alias}.city,
             {alias}.profile_completeness,
             {alias}.status,
-            {alias}.referral_code,
             (
                 select count(*)
                 from user_photos p
@@ -565,7 +548,7 @@ class PostgresRepository:
 
     @staticmethod
     def _user_column_count() -> int:
-        return 15
+        return 14
 
     @staticmethod
     def _row_to_user(row: Any) -> UserRecord:
@@ -581,8 +564,7 @@ class PostgresRepository:
             city=row[8],
             profile_completeness=float(row[9]),
             status=str(row[10]),
-            referral_code=row[11],
-            photo_count=int(row[12]),
-            created_at=str(row[13]),
-            updated_at=str(row[14]),
+            photo_count=int(row[11]),
+            created_at=str(row[12]),
+            updated_at=str(row[13]),
         )

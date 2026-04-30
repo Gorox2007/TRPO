@@ -20,7 +20,6 @@ class CandidateRecommendation:
     score: float
     primary_score: float
     behavioral_score: float
-    referral_score: float
 
 
 class DatingCoreService:
@@ -42,14 +41,12 @@ class DatingCoreService:
         username: str | None,
         first_name: str | None,
         last_name: str | None,
-        referral_code: str | None = None,
     ) -> UserRecord:
         return self.repo.register_or_update_user(
             telegram_id=telegram_id,
             username=username,
             first_name=first_name,
             last_name=last_name,
-            referral_code=referral_code,
         )
 
     def get_profile(self, telegram_id: int) -> UserRecord | None:
@@ -137,6 +134,9 @@ class DatingCoreService:
     def get_primary_photo_for_user_id(self, user_id: int) -> PhotoRecord | None:
         return self.repo.get_primary_photo(user_id)
 
+    def list_photos_for_user_id(self, user_id: int, limit: int = 10) -> list[PhotoRecord]:
+        return self.repo.list_photos(user_id, limit=limit)
+
     def get_next_candidate(self, telegram_id: int) -> CandidateRecommendation | None:
         viewer = self.repo.get_user_by_telegram_id(telegram_id)
         if viewer is None:
@@ -155,7 +155,6 @@ class DatingCoreService:
                     score=item.score,
                     primary_score=item.primary_score,
                     behavioral_score=item.behavioral_score,
-                    referral_score=item.referral_score,
                 )
                 for item in ranked[: self.recommendation_batch_size]
             ],
@@ -196,7 +195,6 @@ class DatingCoreService:
             score=cached.score,
             primary_score=cached.primary_score,
             behavioral_score=cached.behavioral_score,
-            referral_score=cached.referral_score,
         )
 
     def _score_candidate(
@@ -207,7 +205,11 @@ class DatingCoreService:
     ) -> CandidateRecommendation:
         age_score = self._age_score(candidate.user.birth_date, preferences)
         gender_score = 100.0 if preferences.preferred_gender in {"any", candidate.user.gender} else 0.0
-        city_score = self._city_score(viewer_city=viewer.city, preferred_city=preferences.preferred_city, candidate_city=candidate.user.city)
+        city_score = self._city_score(
+            viewer_city=viewer.city,
+            preferred_city=preferences.preferred_city,
+            candidate_city=candidate.user.city,
+        )
         completeness_score = candidate.user.profile_completeness
         photo_score = min(candidate.user.photo_count, 5) / 5 * 100
 
@@ -225,15 +227,12 @@ class DatingCoreService:
         match_score = min(candidate.matches_count, 10) / 10 * 100
         behavioral_score = like_score * 0.70 + match_score * 0.30
 
-        referral_score = min(candidate.referrals_count, 5) / 5 * 100
-
-        total_score = primary_score * 0.65 + behavioral_score * 0.30 + referral_score * 0.05
+        total_score = primary_score * 0.70 + behavioral_score * 0.30
         return CandidateRecommendation(
             user=candidate.user,
             score=round(total_score, 2),
             primary_score=round(primary_score, 2),
             behavioral_score=round(behavioral_score, 2),
-            referral_score=round(referral_score, 2),
         )
 
     @staticmethod

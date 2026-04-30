@@ -59,7 +59,7 @@ python3 -m stage2_bot.run
 
 ## Основные команды
 
-- `/start [referral_code]` - регистрация и реферальный код.
+- `/start` - регистрация.
 - `/profile` - просмотр анкеты.
 - `/profile_set birth_date=2000-01-31 gender=female city=Москва bio="Люблю кофе"` - создание или обновление анкеты.
 - `/profile_delete` - удаление анкеты.

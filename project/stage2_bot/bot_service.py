@@ -6,13 +6,13 @@ import time
 from typing import Any
 
 from .core import CandidateRecommendation, DatingCoreService
-from .db import DatabaseError, UserRecord
+from .db import DatabaseError, PhotoRecord, UserRecord
 from .telegram_api import TelegramApiError, TelegramClient
 
 
 HELP_TEXT = (
     "Команды:\n"
-    "/start [referral_code] - регистрация\n"
+    "/start - регистрация\n"
     "/profile - посмотреть анкету\n"
     "/profile_set birth_date=2000-01-31 gender=female city=Москва bio=\"Люблю кофе\" - создать/обновить анкету\n"
     "/profile_delete - удалить анкету\n"
@@ -38,6 +38,8 @@ class TelegramBotService:
             try:
                 updates = self.tg.get_updates(offset=self.offset)
             except TelegramApiError as exc:
+                if not exc.retriable:
+                    raise
                 print(f"Telegram polling warning: {exc}. Retrying in 3 seconds.", file=sys.stderr)
                 time.sleep(3)
                 continue
@@ -76,8 +78,7 @@ class TelegramBotService:
         text = (message.get("text") or "").strip()
 
         if text.startswith("/start"):
-            referral_code = _command_args(text).strip() or None
-            self._cmd_start(chat_id, int(telegram_id), username, first_name, last_name, referral_code)
+            self._cmd_start(chat_id, int(telegram_id), username, first_name, last_name)
             return
 
         if text.startswith("/help"):
@@ -125,10 +126,9 @@ class TelegramBotService:
         username: str | None,
         first_name: str | None,
         last_name: str | None,
-        referral_code: str | None,
     ) -> None:
         try:
-            user = self.core.register_user(telegram_id, username, first_name, last_name, referral_code)
+            user = self.core.register_user(telegram_id, username, first_name, last_name)
             total = self.core.repo.count_users()
         except DatabaseError as exc:
             self.tg.send_message(chat_id, f"Ошибка БД: {exc}")
@@ -140,7 +140,6 @@ class TelegramBotService:
             f"Привет, {name}!\n"
             "Вы зарегистрированы в боте.\n"
             f"telegram_id: {user.telegram_id}\n"
-            f"referral_code: {user.referral_code or '-'}\n"
             f"Всего пользователей: {total}\n\n"
             "Этап 3: анкеты, рейтинг и подбор кандидатов доступны. Используйте /help.",
         )
@@ -288,27 +287,54 @@ class TelegramBotService:
 
     def _send_profile_card(self, chat_id: int, user: UserRecord, prefix: str = "") -> None:
         text = prefix + _format_profile(user)
-        photo = self.core.get_primary_photo_for_user_id(user.id)
-        if photo is None:
+        photos = self.core.list_photos_for_user_id(user.id)
+        if not photos:
             self.tg.send_message(chat_id, text)
             return
 
         try:
-            self.tg.send_photo(chat_id, photo.telegram_file_id, caption=text)
+            self._send_photos(chat_id, photos, text)
         except TelegramApiError:
             self.tg.send_message(chat_id, text)
 
     def _send_candidate_card(self, chat_id: int, candidate: CandidateRecommendation) -> None:
         text = _format_candidate(candidate)
-        photo = self.core.get_primary_photo_for_user_id(candidate.user.id)
-        if photo is None:
+        photos = self.core.list_photos_for_user_id(candidate.user.id)
+        if not photos:
             self.tg.send_message(chat_id, text)
             return
 
         try:
-            self.tg.send_photo(chat_id, photo.telegram_file_id, caption=text)
+            self._send_photos(chat_id, photos, text)
         except TelegramApiError:
             self.tg.send_message(chat_id, text)
+
+    def _send_photos(self, chat_id: int, photos: list[PhotoRecord], caption: str) -> None:
+        if len(photos) == 1:
+            self.tg.send_photo(chat_id, photos[0].telegram_file_id, caption=caption)
+            return
+        try:
+            self._send_photo_album(chat_id, photos, caption)
+        except TelegramApiError:
+            self._send_photo_series(chat_id, photos, caption)
+
+    def _send_photo_album(self, chat_id: int, photos: list[PhotoRecord], caption: str) -> None:
+        media: list[dict[str, Any]] = []
+        for index, photo in enumerate(photos):
+            item: dict[str, Any] = {
+                "type": "photo",
+                "media": photo.telegram_file_id,
+            }
+            if index == 0:
+                item["caption"] = caption
+            media.append(item)
+        self.tg.send_media_group(chat_id, media)
+
+    def _send_photo_series(self, chat_id: int, photos: list[PhotoRecord], caption: str) -> None:
+        self.tg.send_photo(chat_id, photos[0].telegram_file_id, caption=caption)
+        for photo in photos[1:]:
+            time.sleep(0.2)
+            self.tg.send_photo(chat_id, photo.telegram_file_id)
 
 
 def _format_profile(user: UserRecord) -> str:
@@ -321,8 +347,7 @@ def _format_profile(user: UserRecord) -> str:
         f"city: {user.city or '-'}\n"
         f"bio: {user.bio or '-'}\n"
         f"photos: {user.photo_count}\n"
-        f"profile_completeness: {user.profile_completeness:.0f}%\n"
-        f"referral_code: {user.referral_code or '-'}"
+        f"profile_completeness: {user.profile_completeness:.0f}%"
     )
 
 
@@ -337,7 +362,7 @@ def _format_candidate(candidate: CandidateRecommendation) -> str:
         f"bio: {user.bio or '-'}\n"
         f"photos: {user.photo_count}\n\n"
         f"score: {candidate.score:.2f}\n"
-        f"primary: {candidate.primary_score:.2f}, behavior: {candidate.behavioral_score:.2f}, referral: {candidate.referral_score:.2f}\n\n"
+        f"primary: {candidate.primary_score:.2f}, behavior: {candidate.behavioral_score:.2f}\n\n"
         "Ответьте /like или /skip."
     )
 
@@ -394,3 +419,4 @@ def _parse_bool(raw: str | None) -> bool:
     if raw is None:
         return False
     return raw.casefold() in {"1", "true", "yes", "да"}
+

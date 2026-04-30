@@ -14,8 +14,6 @@ create table if not exists users (
         check (profile_completeness between 0 and 100),
     status text not null default 'active'
         check (status in ('active', 'paused', 'banned')),
-    referral_code text,
-    referred_by_user_id bigint references users(id) on delete set null,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
@@ -32,16 +30,16 @@ alter table users add column if not exists latitude numeric(9,6);
 alter table users add column if not exists longitude numeric(9,6);
 alter table users add column if not exists profile_completeness numeric(5,2) not null default 0;
 alter table users add column if not exists status text not null default 'active';
-alter table users add column if not exists referral_code text;
-alter table users add column if not exists referred_by_user_id bigint references users(id) on delete set null;
 alter table users add column if not exists created_at timestamptz not null default now();
 alter table users add column if not exists updated_at timestamptz not null default now();
 alter table users alter column birth_date drop not null;
 alter table users alter column gender drop not null;
 alter table users alter column city drop not null;
+alter table users drop column if exists referred_by_user_id;
+alter table users drop column if exists referral_code;
 
 create unique index if not exists uq_users_telegram_id on users(telegram_id);
-create unique index if not exists uq_users_referral_code on users(referral_code) where referral_code is not null;
+drop index if exists uq_users_referral_code;
 create index if not exists idx_users_status on users(status);
 
 create table if not exists user_photos (

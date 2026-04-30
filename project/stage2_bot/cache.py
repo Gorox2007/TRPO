@@ -10,7 +10,6 @@ class CachedCandidate:
     score: float
     primary_score: float
     behavioral_score: float
-    referral_score: float
 
 
 @dataclass
@@ -20,12 +19,7 @@ class _CacheEntry:
 
 
 class RecommendationCache:
-    """Small in-memory cache for pre-ranked candidate queues.
-
-    It plays the role of Redis in the learning MVP without adding another
-    service dependency. The public interface is deliberately small so it can be
-    swapped for Redis later.
-    """
+    """Small in-memory cache for pre-ranked candidate queues."""
 
     def __init__(self, ttl_sec: int = 300) -> None:
         self.ttl_sec = ttl_sec

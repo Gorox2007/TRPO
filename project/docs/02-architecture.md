@@ -31,16 +31,15 @@ sequenceDiagram
     B->>C: запрос кандидата для user_id
     C->>D: профиль + предпочтения + уже просмотренные
     D->>C: пул кандидатов по фильтрам
-    C->>C: score = primary + behavior + referral
+    C->>C: score = primary + behavior
     C-->>B: лучший кандидат
     B-->>U: карточка кандидата
 ```
 
 ## 2.4 Формула скоринга Этапа 3
 
-`total_score = 0.65 * primary_score + 0.30 * behavioral_score + 0.05 * referral_score`
+`total_score = 0.70 * primary_score + 0.30 * behavioral_score`
 
 Где:
 - `primary_score`: возраст, пол, город, полнота анкеты и фото;
-- `behavioral_score`: лайки, пропуски и мэтчи;
-- `referral_score`: бонус за приглашенных пользователей.
+- `behavioral_score`: лайки, пропуски и мэтчи.
