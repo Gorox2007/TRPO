@@ -128,6 +128,15 @@ class DatingCoreService:
             self.cache.invalidate(user.id)
         return photo
 
+    def get_primary_photo_for_telegram_user(self, telegram_id: int) -> PhotoRecord | None:
+        user = self.repo.get_user_by_telegram_id(telegram_id)
+        if user is None:
+            return None
+        return self.repo.get_primary_photo(user.id)
+
+    def get_primary_photo_for_user_id(self, user_id: int) -> PhotoRecord | None:
+        return self.repo.get_primary_photo(user_id)
+
     def get_next_candidate(self, telegram_id: int) -> CandidateRecommendation | None:
         viewer = self.repo.get_user_by_telegram_id(telegram_id)
         if viewer is None:

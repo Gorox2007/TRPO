@@ -72,8 +72,8 @@ docker compose down
 
 После запуска заполняются:
 
-- `results/raw_results.csv`
-- `results/summary.md`
+- [`results/raw_results.csv`](results/raw_results.csv)
+- [`results/summary.md`](results/summary.md)
 
 `summary.md` уже содержит:
 
@@ -83,20 +83,5 @@ docker compose down
 
 ## Скриншоты для сдачи
 
-Сохрани в `screenshots/` минимум:
-
-1. `01_services_up.png` - `docker compose ps` (видно `postgres` и `redis` в `Up`).
-2. `02_benchmark_run.png` - консоль с прогонами `python benchmark.py ...`.
-3. `03_summary_report.png` - содержимое `results/summary.md`.
-4. `04_raw_results.png` - фрагмент `results/raw_results.csv`.
-
-## Полезные параметры
-
-```bash
-python benchmark.py \
-  --duration-sec 30 \
-  --target-rps 600 \
-  --dataset-size 10000 \
-  --write-back-flush-interval-sec 0.2 \
-  --write-back-batch-size 300
-```
+1. ![Запущенные postgres и redis](screenshots/1.png)
+2. ![Логи](screenshots/2.png)

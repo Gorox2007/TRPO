@@ -33,6 +33,15 @@ class TelegramClient:
             },
         )
 
+    def send_photo(self, chat_id: int, photo: str, caption: str | None = None) -> None:
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "photo": photo,
+        }
+        if caption is not None:
+            payload["caption"] = caption
+        self._call("sendPhoto", payload)
+
     def _call(self, method: str, payload: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.api_base}/bot{self.token}/{method}"
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")

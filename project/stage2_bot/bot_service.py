@@ -156,7 +156,7 @@ class TelegramBotService:
             self.tg.send_message(chat_id, "Вы еще не зарегистрированы. Нажмите /start.")
             return
 
-        self.tg.send_message(chat_id, _format_profile(user))
+        self._send_profile_card(chat_id, user)
 
     def _cmd_profile_set(self, chat_id: int, telegram_id: int, args: str) -> None:
         try:
@@ -172,7 +172,7 @@ class TelegramBotService:
             self.tg.send_message(chat_id, f"Не удалось сохранить анкету: {exc}")
             return
 
-        self.tg.send_message(chat_id, "Анкета сохранена.\n\n" + _format_profile(user))
+        self._send_profile_card(chat_id, user, prefix="Анкета сохранена.\n\n")
 
     def _cmd_profile_delete(self, chat_id: int, telegram_id: int) -> None:
         try:
@@ -262,7 +262,7 @@ class TelegramBotService:
             return
 
         self.current_candidates[telegram_id] = candidate.user.id
-        self.tg.send_message(chat_id, _format_candidate(candidate))
+        self._send_candidate_card(chat_id, candidate)
 
     def _cmd_reaction(self, chat_id: int, telegram_id: int, action_type: str) -> None:
         target_user_id = self.current_candidates.get(telegram_id)
@@ -285,6 +285,30 @@ class TelegramBotService:
             self.tg.send_message(chat_id, "Лайк сохранен. Используйте /next для следующего кандидата.")
         else:
             self.tg.send_message(chat_id, "Кандидат пропущен. Используйте /next для следующего кандидата.")
+
+    def _send_profile_card(self, chat_id: int, user: UserRecord, prefix: str = "") -> None:
+        text = prefix + _format_profile(user)
+        photo = self.core.get_primary_photo_for_user_id(user.id)
+        if photo is None:
+            self.tg.send_message(chat_id, text)
+            return
+
+        try:
+            self.tg.send_photo(chat_id, photo.telegram_file_id, caption=text)
+        except TelegramApiError:
+            self.tg.send_message(chat_id, text)
+
+    def _send_candidate_card(self, chat_id: int, candidate: CandidateRecommendation) -> None:
+        text = _format_candidate(candidate)
+        photo = self.core.get_primary_photo_for_user_id(candidate.user.id)
+        if photo is None:
+            self.tg.send_message(chat_id, text)
+            return
+
+        try:
+            self.tg.send_photo(chat_id, photo.telegram_file_id, caption=text)
+        except TelegramApiError:
+            self.tg.send_message(chat_id, text)
 
 
 def _format_profile(user: UserRecord) -> str:

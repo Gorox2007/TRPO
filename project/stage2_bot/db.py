@@ -310,6 +310,34 @@ class PostgresRepository:
             is_primary=bool(row[4]),
         )
 
+    def get_primary_photo(self, user_id: int) -> PhotoRecord | None:
+        query = """
+        select
+            id,
+            telegram_file_id,
+            telegram_file_unique_id,
+            position,
+            is_primary
+        from user_photos
+        where user_id = %s
+          and is_active = true
+        order by is_primary desc, position asc, id asc
+        limit 1;
+        """
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (user_id,))
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return PhotoRecord(
+            id=int(row[0]),
+            telegram_file_id=str(row[1]),
+            telegram_file_unique_id=str(row[2]),
+            position=int(row[3]),
+            is_primary=bool(row[4]),
+        )
+
     def list_candidates_for_user(self, viewer_user_id: int, limit: int = 200) -> list[CandidateStats]:
         query = f"""
         select

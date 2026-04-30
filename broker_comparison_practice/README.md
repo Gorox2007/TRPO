@@ -96,9 +96,4 @@ docker compose down
 4. При какой нагрузке `single instance Redis` начинает деградировать: с `5000 msg/sec` по критерию `<95%` от target, при `10000 msg/sec` дополнительно резко растет latency.
 5. Какой инструмент подходит лучше для этого сценария и почему: собственный `producer/consumer` на Python, потому что он дает полный контроль над payload, rate и сбором метрик (sent/processed/lost/latency) в одинаковой логике для обоих брокеров.
 
-
-
-
 <img width="1829" height="776" alt="image" src="https://github.com/user-attachments/assets/6029c7bb-8298-4066-a926-af232556882a" />
-
-
