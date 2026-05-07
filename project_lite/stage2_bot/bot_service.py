@@ -6,7 +6,7 @@ import time
 from typing import Any
 
 from .core import CandidateRecommendation, DatingCoreService
-from .db import DatabaseError, MatchRecord, PhotoRecord, UserRecord
+from .db import DatabaseError, PhotoRecord, UserRecord
 from .telegram_api import TelegramApiError, TelegramClient
 
 
@@ -17,11 +17,10 @@ HELP_TEXT = (
     "/profile_set birth_date=2000-01-31 gender=female city=Москва bio=\"Люблю кофе\" - создать/обновить анкету\n"
     "/profile_delete - удалить анкету\n"
     "/prefs - посмотреть предпочтения\n"
-    "/prefs age=18-35 gender=any city=any - обновить предпочтения\n"
+    "/prefs age=18-35 gender=any city=any distance=50 - обновить предпочтения\n"
     "/next - следующий кандидат по рейтингу\n"
     "/like - лайк текущего кандидата\n"
     "/skip - пропуск текущего кандидата\n"
-    "/matches - показать взаимные лайки и контакты\n"
     "/photo_add file_id=... unique_id=... - добавить фото вручную\n"
     "Можно также отправить фото в чат, и бот добавит его в анкету."
 )
@@ -32,6 +31,7 @@ class TelegramBotService:
         self.tg = tg
         self.core = core
         self.offset: int | None = None
+        self.current_candidates: dict[int, int] = {}
 
     def run_forever(self) -> None:
         while True:
@@ -71,18 +71,6 @@ class TelegramBotService:
             self.tg.send_message(chat_id, "Не удалось определить Telegram ID.")
             return
 
-        try:
-            self.core.sync_existing_user_telegram_profile(
-                telegram_id=int(telegram_id),
-                telegram_chat_id=int(chat_id),
-                username=username,
-                first_name=first_name,
-                last_name=last_name,
-            )
-        except DatabaseError as exc:
-            self.tg.send_message(chat_id, f"Ошибка БД: {exc}")
-            return
-
         if message.get("photo"):
             self._cmd_photo(chat_id, int(telegram_id), message["photo"])
             return
@@ -90,7 +78,7 @@ class TelegramBotService:
         text = (message.get("text") or "").strip()
 
         if text.startswith("/start"):
-            self._cmd_start(chat_id, int(telegram_id), int(chat_id), username, first_name, last_name)
+            self._cmd_start(chat_id, int(telegram_id), username, first_name, last_name)
             return
 
         if text.startswith("/help"):
@@ -129,23 +117,18 @@ class TelegramBotService:
             self._cmd_reaction(chat_id, int(telegram_id), "skip")
             return
 
-        if text.startswith("/matches"):
-            self._cmd_matches(chat_id, int(telegram_id))
-            return
-
         self.tg.send_message(chat_id, "Неизвестная команда. Используйте /help.")
 
     def _cmd_start(
         self,
         chat_id: int,
         telegram_id: int,
-        telegram_chat_id: int,
         username: str | None,
         first_name: str | None,
         last_name: str | None,
     ) -> None:
         try:
-            user = self.core.register_user(telegram_id, telegram_chat_id, username, first_name, last_name)
+            user = self.core.register_user(telegram_id, username, first_name, last_name)
             total = self.core.repo.count_users()
         except DatabaseError as exc:
             self.tg.send_message(chat_id, f"Ошибка БД: {exc}")
@@ -197,7 +180,7 @@ class TelegramBotService:
             self.tg.send_message(chat_id, f"Ошибка БД: {exc}")
             return
 
-        self.core.clear_current_candidate(telegram_id)
+        self.current_candidates.pop(telegram_id, None)
         if deleted:
             self.tg.send_message(chat_id, "Анкета удалена. Чтобы создать новую, отправьте /start.")
         else:
@@ -207,8 +190,6 @@ class TelegramBotService:
         try:
             if args.strip():
                 fields = _parse_key_values(args)
-                if "distance" in fields or "max_distance_km" in fields:
-                    raise ValueError("distance больше не поддерживается. Используйте только age, gender и city")
                 age_min, age_max = _parse_age_range(fields.get("age"))
                 pref = self.core.update_preferences(
                     telegram_id=telegram_id,
@@ -216,6 +197,7 @@ class TelegramBotService:
                     age_max=_optional_int(fields.get("age_max")) or age_max,
                     preferred_gender=fields.get("gender") or fields.get("preferred_gender"),
                     preferred_city=fields.get("city") or fields.get("preferred_city"),
+                    max_distance_km=_optional_int(fields.get("distance") or fields.get("max_distance_km")),
                 )
                 prefix = "Предпочтения обновлены:\n"
             else:
@@ -230,7 +212,8 @@ class TelegramBotService:
             prefix
             + f"age: {pref.age_min}-{pref.age_max}\n"
             + f"preferred_gender: {pref.preferred_gender}\n"
-            + f"preferred_city: {pref.preferred_city}",
+            + f"preferred_city: {pref.preferred_city}\n"
+            + f"max_distance_km: {pref.max_distance_km}",
         )
 
     def _cmd_photo(self, chat_id: int, telegram_id: int, photos: list[dict[str, Any]]) -> None:
@@ -273,19 +256,15 @@ class TelegramBotService:
             return
 
         if candidate is None:
-            self.core.clear_current_candidate(telegram_id)
+            self.current_candidates.pop(telegram_id, None)
             self.tg.send_message(chat_id, "Подходящих кандидатов пока нет. Попробуйте позже или расширьте /prefs.")
             return
 
-        self.core.set_current_candidate(telegram_id, candidate.user.id)
+        self.current_candidates[telegram_id] = candidate.user.id
         self._send_candidate_card(chat_id, candidate)
 
     def _cmd_reaction(self, chat_id: int, telegram_id: int, action_type: str) -> None:
-        try:
-            target_user_id = self.core.get_current_candidate_user_id(telegram_id)
-        except DatabaseError as exc:
-            self.tg.send_message(chat_id, f"Ошибка БД: {exc}")
-            return
+        target_user_id = self.current_candidates.get(telegram_id)
         if target_user_id is None:
             self.tg.send_message(chat_id, "Сначала получите кандидата командой /next.")
             return
@@ -296,27 +275,15 @@ class TelegramBotService:
             self.tg.send_message(chat_id, f"Ошибка БД: {exc}")
             return
 
-        self.core.clear_current_candidate(telegram_id)
+        self.current_candidates.pop(telegram_id, None)
         if result.is_match:
-            self.tg.send_message(chat_id, _format_match_success(result.target))
+            name = _display_name(result.target)
+            self.tg.send_message(chat_id, f"Это взаимный лайк с {name}! Можно начинать общение.")
             return
         if action_type == "like":
             self.tg.send_message(chat_id, "Лайк сохранен. Используйте /next для следующего кандидата.")
         else:
             self.tg.send_message(chat_id, "Кандидат пропущен. Используйте /next для следующего кандидата.")
-
-    def _cmd_matches(self, chat_id: int, telegram_id: int) -> None:
-        try:
-            matches = self.core.list_matches(telegram_id)
-        except DatabaseError as exc:
-            self.tg.send_message(chat_id, f"Ошибка БД: {exc}")
-            return
-
-        if not matches:
-            self.tg.send_message(chat_id, "У вас пока нет взаимных лайков.")
-            return
-
-        self.tg.send_message(chat_id, _format_matches(matches))
 
     def _send_profile_card(self, chat_id: int, user: UserRecord, prefix: str = "") -> None:
         text = prefix + _format_profile(user)
@@ -374,7 +341,7 @@ def _format_profile(user: UserRecord) -> str:
     return (
         "Ваша анкета:\n"
         f"name: {_display_name(user)}\n"
-        f"username: {_username_or_dash(user.username)}\n"
+        f"username: {user.username or '-'}\n"
         f"birth_date: {user.birth_date or '-'}\n"
         f"gender: {user.gender or '-'}\n"
         f"city: {user.city or '-'}\n"
@@ -400,38 +367,11 @@ def _format_candidate(candidate: CandidateRecommendation) -> str:
     )
 
 
-def _format_match_success(user: UserRecord) -> str:
-    return (
-        f"Это взаимный лайк с {_display_name(user)}!\n"
-        f"{_contact_line(user)}"
-    )
-
-
-def _format_matches(matches: list[MatchRecord]) -> str:
-    lines = ["Ваши мэтчи:"]
-    for index, match in enumerate(matches, start=1):
-        lines.append(f"{index}. {_display_name(match.user)}")
-        lines.append(f"   {_contact_line(match.user)}")
-    return "\n".join(lines)
-
-
 def _display_name(user: UserRecord) -> str:
     parts = [part for part in [user.first_name, user.last_name] if part]
     if parts:
         return " ".join(parts)
     return user.username or f"user_{user.telegram_id}"
-
-
-def _username_or_dash(username: str | None) -> str:
-    if not username:
-        return "-"
-    return f"@{username}"
-
-
-def _contact_line(user: UserRecord) -> str:
-    if user.username:
-        return f"Написать: @{user.username}\nСсылка: https://t.me/{user.username}"
-    return "У пользователя нет @username, поэтому написать ему напрямую в Telegram пока нельзя."
 
 
 def _age_or_dash(birth_date: str | None) -> str:

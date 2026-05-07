@@ -53,28 +53,29 @@ do update set
     status = 'active',
     updated_at = now();
 
-with pref_seed(telegram_id, age_min, age_max, preferred_gender, preferred_city) as (
+with pref_seed(telegram_id, age_min, age_max, preferred_gender, preferred_city, max_distance_km) as (
     values
-        (900001, 24, 34, 'male', 'Москва'),
-        (900002, 23, 33, 'male', 'Москва'),
-        (900003, 24, 36, 'male', 'Санкт-Петербург'),
-        (900004, 25, 35, 'male', 'any'),
-        (900005, 22, 31, 'male', 'Москва'),
-        (900006, 24, 37, 'male', 'any'),
-        (900007, 21, 32, 'female', 'Москва'),
-        (900008, 24, 34, 'female', 'Москва'),
-        (900009, 22, 31, 'female', 'Санкт-Петербург'),
-        (900010, 22, 35, 'female', 'any'),
-        (900011, 23, 34, 'female', 'Казань'),
-        (900012, 20, 30, 'female', 'Москва')
+        (900001, 24, 34, 'male', 'Москва', 50),
+        (900002, 23, 33, 'male', 'Москва', 30),
+        (900003, 24, 36, 'male', 'Санкт-Петербург', 40),
+        (900004, 25, 35, 'male', 'any', 100),
+        (900005, 22, 31, 'male', 'Москва', 25),
+        (900006, 24, 37, 'male', 'any', 200),
+        (900007, 21, 32, 'female', 'Москва', 50),
+        (900008, 24, 34, 'female', 'Москва', 50),
+        (900009, 22, 31, 'female', 'Санкт-Петербург', 35),
+        (900010, 22, 35, 'female', 'any', 150),
+        (900011, 23, 34, 'female', 'Казань', 50),
+        (900012, 20, 30, 'female', 'Москва', 30)
 )
-insert into user_preferences (user_id, age_min, age_max, preferred_gender, preferred_city)
+insert into user_preferences (user_id, age_min, age_max, preferred_gender, preferred_city, max_distance_km)
 select
     u.id,
     p.age_min,
     p.age_max,
     p.preferred_gender,
-    p.preferred_city
+    p.preferred_city,
+    p.max_distance_km
 from pref_seed p
 join users u on u.telegram_id = p.telegram_id
 on conflict (user_id)
@@ -83,6 +84,7 @@ do update set
     age_max = excluded.age_max,
     preferred_gender = excluded.preferred_gender,
     preferred_city = excluded.preferred_city,
+    max_distance_km = excluded.max_distance_km,
     updated_at = now();
 
 with photo_seed(telegram_id, telegram_file_id, telegram_file_unique_id, position, is_primary) as (

@@ -35,6 +35,7 @@ class PreferenceRecord:
     age_max: int
     preferred_gender: str
     preferred_city: str
+    max_distance_km: int | None
 
 
 @dataclass
@@ -61,12 +62,6 @@ class ActionResult:
     is_match: bool
 
 
-@dataclass
-class MatchRecord:
-    user: UserRecord
-    created_at: str
-
-
 class PostgresRepository:
     """PostgreSQL data layer for registration, profiles and matching."""
 
@@ -85,7 +80,6 @@ class PostgresRepository:
     def register_or_update_user(
         self,
         telegram_id: int,
-        telegram_chat_id: int | None,
         username: str | None,
         first_name: str | None,
         last_name: str | None,
@@ -93,56 +87,25 @@ class PostgresRepository:
         query = """
         insert into users (
             telegram_id,
-            telegram_chat_id,
             username,
             first_name,
             last_name
         )
-        values (%s, %s, %s, %s, %s)
+        values (%s, %s, %s, %s)
         on conflict (telegram_id)
         do update set
-            telegram_chat_id = excluded.telegram_chat_id,
             username = excluded.username,
             first_name = excluded.first_name,
             last_name = excluded.last_name,
             status = 'active',
-            last_seen_at = now(),
             updated_at = now()
         returning id;
         """
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute(query, (telegram_id, telegram_chat_id, username, first_name, last_name))
+                cur.execute(query, (telegram_id, username, first_name, last_name))
                 row = cur.fetchone()
             conn.commit()
-        return self.get_user_by_id(int(row[0]))
-
-    def sync_existing_user_telegram_profile(
-        self,
-        telegram_id: int,
-        telegram_chat_id: int | None,
-        username: str | None,
-        first_name: str | None,
-        last_name: str | None,
-    ) -> UserRecord | None:
-        query = """
-        update users
-        set
-            telegram_chat_id = %s,
-            username = %s,
-            first_name = %s,
-            last_name = %s,
-            last_seen_at = now()
-        where telegram_id = %s
-        returning id;
-        """
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(query, (telegram_chat_id, username, first_name, last_name, telegram_id))
-                row = cur.fetchone()
-            conn.commit()
-        if row is None:
-            return None
         return self.get_user_by_id(int(row[0]))
 
     def get_user_by_telegram_id(self, telegram_id: int) -> UserRecord | None:
@@ -218,12 +181,13 @@ class PostgresRepository:
                         age_min,
                         age_max,
                         preferred_gender,
-                        preferred_city
+                        preferred_city,
+                        max_distance_km
                     )
-                    values (%s, 18, 35, 'any', 'any')
+                    values (%s, 18, 35, 'any', 'any', 50)
                     on conflict (user_id)
                     do update set updated_at = user_preferences.updated_at
-                    returning age_min, age_max, preferred_gender, preferred_city;
+                    returning age_min, age_max, preferred_gender, preferred_city, max_distance_km;
                     """,
                     (user.id,),
                 )
@@ -238,6 +202,7 @@ class PostgresRepository:
         age_max: int | None = None,
         preferred_gender: str | None = None,
         preferred_city: str | None = None,
+        max_distance_km: int | None = None,
     ) -> PreferenceRecord:
         user = self.get_user_by_telegram_id(telegram_id)
         if user is None:
@@ -251,9 +216,10 @@ class PostgresRepository:
             age_max = coalesce(%s, age_max),
             preferred_gender = coalesce(%s, preferred_gender),
             preferred_city = coalesce(%s, preferred_city),
+            max_distance_km = coalesce(%s, max_distance_km),
             updated_at = now()
         where user_id = %s
-        returning age_min, age_max, preferred_gender, preferred_city;
+        returning age_min, age_max, preferred_gender, preferred_city, max_distance_km;
         """
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -264,6 +230,7 @@ class PostgresRepository:
                         age_max,
                         preferred_gender,
                         preferred_city,
+                        max_distance_km,
                         user.id,
                     ),
                 )
@@ -415,7 +382,7 @@ class PostgresRepository:
               where (m.user_a_id = %s and m.user_b_id = u.id)
                  or (m.user_b_id = %s and m.user_a_id = u.id)
           )
-        order by u.last_seen_at desc nulls last, u.updated_at desc
+        order by u.updated_at desc
         limit %s;
         """
         with self._connect() as conn:
@@ -436,92 +403,6 @@ class PostgresRepository:
                 )
             )
         return stats
-
-    def set_current_candidate(self, viewer_telegram_id: int, candidate_user_id: int | None) -> None:
-        viewer = self.get_user_by_telegram_id(viewer_telegram_id)
-        if viewer is None:
-            raise DatabaseError("current candidate cannot be stored before /start")
-
-        query = """
-        insert into user_view_state (
-            user_id,
-            current_candidate_user_id,
-            updated_at
-        )
-        values (%s, %s, now())
-        on conflict (user_id)
-        do update set
-            current_candidate_user_id = excluded.current_candidate_user_id,
-            updated_at = now();
-        """
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(query, (viewer.id, candidate_user_id))
-            conn.commit()
-
-    def get_current_candidate_user_id(self, viewer_telegram_id: int) -> int | None:
-        viewer = self.get_user_by_telegram_id(viewer_telegram_id)
-        if viewer is None:
-            return None
-
-        query = """
-        select current_candidate_user_id
-        from user_view_state
-        where user_id = %s;
-        """
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(query, (viewer.id,))
-                row = cur.fetchone()
-        if row is None or row[0] is None:
-            return None
-        return int(row[0])
-
-    def clear_current_candidate(self, viewer_telegram_id: int) -> None:
-        viewer = self.get_user_by_telegram_id(viewer_telegram_id)
-        if viewer is None:
-            return
-
-        query = "delete from user_view_state where user_id = %s;"
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(query, (viewer.id,))
-            conn.commit()
-
-    def list_matches_for_user(self, telegram_id: int, limit: int = 50) -> list[MatchRecord]:
-        user = self.get_user_by_telegram_id(telegram_id)
-        if user is None:
-            raise DatabaseError("matches cannot be loaded before /start")
-
-        query = f"""
-        select
-            {self._user_select_columns("u")},
-            m.created_at
-        from matches m
-        join users u
-          on u.id = case
-              when m.user_a_id = %s then m.user_b_id
-              else m.user_a_id
-          end
-        where m.user_a_id = %s or m.user_b_id = %s
-        order by m.created_at desc
-        limit %s;
-        """
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(query, (user.id, user.id, user.id, limit))
-                rows = cur.fetchall()
-
-        user_columns_count = self._user_column_count()
-        matches: list[MatchRecord] = []
-        for row in rows:
-            matches.append(
-                MatchRecord(
-                    user=self._row_to_user(row[:user_columns_count]),
-                    created_at=str(row[user_columns_count]),
-                )
-            )
-        return matches
 
     def record_action(self, actor_telegram_id: int, target_user_id: int, action_type: str) -> ActionResult:
         if action_type not in {"like", "skip", "block"}:
@@ -640,6 +521,7 @@ class PostgresRepository:
             age_max=int(row[1]),
             preferred_gender=str(row[2]),
             preferred_city=str(row[3]),
+            max_distance_km=None if row[4] is None else int(row[4]),
         )
 
     @staticmethod

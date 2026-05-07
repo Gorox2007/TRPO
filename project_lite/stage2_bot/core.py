@@ -8,7 +8,6 @@ from .cache import CachedCandidate, RecommendationCache
 from .db import (
     ActionResult,
     CandidateStats,
-    MatchRecord,
     PhotoRecord,
     PostgresRepository,
     PreferenceRecord,
@@ -40,30 +39,12 @@ class DatingCoreService:
     def register_user(
         self,
         telegram_id: int,
-        telegram_chat_id: int | None,
         username: str | None,
         first_name: str | None,
         last_name: str | None,
     ) -> UserRecord:
         return self.repo.register_or_update_user(
             telegram_id=telegram_id,
-            telegram_chat_id=telegram_chat_id,
-            username=username,
-            first_name=first_name,
-            last_name=last_name,
-        )
-
-    def sync_existing_user_telegram_profile(
-        self,
-        telegram_id: int,
-        telegram_chat_id: int | None,
-        username: str | None,
-        first_name: str | None,
-        last_name: str | None,
-    ) -> UserRecord | None:
-        return self.repo.sync_existing_user_telegram_profile(
-            telegram_id=telegram_id,
-            telegram_chat_id=telegram_chat_id,
             username=username,
             first_name=first_name,
             last_name=last_name,
@@ -107,8 +88,9 @@ class DatingCoreService:
         age_max: int | None = None,
         preferred_gender: str | None = None,
         preferred_city: str | None = None,
+        max_distance_km: int | None = None,
     ) -> PreferenceRecord:
-        self._validate_preferences(age_min, age_max, preferred_gender, preferred_city)
+        self._validate_preferences(age_min, age_max, preferred_gender, preferred_city, max_distance_km)
         user = self.repo.get_user_by_telegram_id(telegram_id)
         pref = self.repo.update_preferences(
             telegram_id=telegram_id,
@@ -116,6 +98,7 @@ class DatingCoreService:
             age_max=age_max,
             preferred_gender=preferred_gender,
             preferred_city=preferred_city,
+            max_distance_km=max_distance_km,
         )
         if user is not None:
             self.cache.invalidate(user.id)
@@ -154,18 +137,6 @@ class DatingCoreService:
 
     def list_photos_for_user_id(self, user_id: int, limit: int = 10) -> list[PhotoRecord]:
         return self.repo.list_photos(user_id, limit=limit)
-
-    def set_current_candidate(self, telegram_id: int, candidate_user_id: int | None) -> None:
-        self.repo.set_current_candidate(telegram_id, candidate_user_id)
-
-    def get_current_candidate_user_id(self, telegram_id: int) -> int | None:
-        return self.repo.get_current_candidate_user_id(telegram_id)
-
-    def clear_current_candidate(self, telegram_id: int) -> None:
-        self.repo.clear_current_candidate(telegram_id)
-
-    def list_matches(self, telegram_id: int, limit: int = 50) -> list[MatchRecord]:
-        return self.repo.list_matches_for_user(telegram_id, limit=limit)
 
     def get_next_candidate(self, telegram_id: int) -> CandidateRecommendation | None:
         viewer = self.repo.get_user_by_telegram_id(telegram_id)
@@ -278,8 +249,8 @@ class DatingCoreService:
             return 30.0
         if preferences.age_min <= age <= preferences.age_max:
             return 100.0
-        age_delta = min(abs(age - preferences.age_min), abs(age - preferences.age_max))
-        return max(0.0, 100.0 - age_delta * 15)
+        distance = min(abs(age - preferences.age_min), abs(age - preferences.age_max))
+        return max(0.0, 100.0 - distance * 15)
 
     @staticmethod
     def _city_score(viewer_city: str | None, preferred_city: str, candidate_city: str | None) -> float:
@@ -310,6 +281,7 @@ class DatingCoreService:
         age_max: int | None,
         preferred_gender: str | None,
         preferred_city: str | None,
+        max_distance_km: int | None,
     ) -> None:
         if age_min is not None and not 18 <= age_min <= 99:
             raise ValueError("age_min must be between 18 and 99")
@@ -321,6 +293,8 @@ class DatingCoreService:
             raise ValueError("preferred gender must be one of: male, female, any")
         if preferred_city is not None and not preferred_city.strip():
             raise ValueError("preferred_city cannot be empty")
+        if max_distance_km is not None and not 1 <= max_distance_km <= 500:
+            raise ValueError("max_distance_km must be between 1 and 500")
 
 
 def _age_from_birth_date(birth_date: str | None) -> int | None:
