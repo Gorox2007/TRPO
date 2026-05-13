@@ -299,9 +299,11 @@ class TelegramBotService:
         self.core.clear_current_candidate(telegram_id)
         if result.is_match:
             self.tg.send_message(chat_id, _format_match_success(result.target))
+            self._notify_target_about_like(result)
             return
         if action_type == "like":
             self.tg.send_message(chat_id, "Лайк сохранен. Используйте /next для следующего кандидата.")
+            self._notify_target_about_like(result)
         else:
             self.tg.send_message(chat_id, "Кандидат пропущен. Используйте /next для следующего кандидата.")
 
@@ -369,6 +371,32 @@ class TelegramBotService:
             time.sleep(0.2)
             self.tg.send_photo(chat_id, photo.telegram_file_id)
 
+    def _notify_target_about_like(self, result: ActionResult) -> None:
+        target_chat_id = result.target.telegram_chat_id
+        if result.action_type != "like" or target_chat_id is None:
+            return
+
+        try:
+            if result.is_match:
+                self.tg.send_message(target_chat_id, _format_match_notification(result.actor))
+                return
+
+            self.core.set_current_candidate(result.target.telegram_id, result.actor.id)
+            self._send_incoming_like_card(target_chat_id, result.actor)
+        except (DatabaseError, TelegramApiError) as exc:
+            print(
+                f"Telegram notify warning: failed to notify user_id={result.target.id}: {exc}",
+                file=sys.stderr,
+            )
+
+    def _send_incoming_like_card(self, chat_id: int, user: UserRecord) -> None:
+        text = _format_incoming_like(user)
+        photos = self.core.list_photos_for_user_id(user.id)
+        if not photos:
+            self.tg.send_message(chat_id, text)
+            return
+        self._send_photos(chat_id, photos, text)
+
 
 def _format_profile(user: UserRecord) -> str:
     return (
@@ -404,6 +432,26 @@ def _format_match_success(user: UserRecord) -> str:
     return (
         f"Это взаимный лайк с {_display_name(user)}!\n"
         f"{_contact_line(user)}"
+    )
+
+
+def _format_match_notification(user: UserRecord) -> str:
+    return (
+        f"У вас взаимный лайк с {_display_name(user)}!\n"
+        f"{_contact_line(user)}"
+    )
+
+
+def _format_incoming_like(user: UserRecord) -> str:
+    return (
+        "Вас лайкнули:\n"
+        f"name: {_display_name(user)}\n"
+        f"age: {_age_or_dash(user.birth_date)}\n"
+        f"gender: {user.gender or '-'}\n"
+        f"city: {user.city or '-'}\n"
+        f"bio: {user.bio or '-'}\n"
+        f"photos: {user.photo_count}\n\n"
+        "Ответьте /like, чтобы поставить взаимный лайк, или /skip, чтобы пропустить."
     )
 
 

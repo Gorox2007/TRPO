@@ -183,6 +183,7 @@ def _make_user(
     return UserRecord(
         id=user_id,
         telegram_id=telegram_id,
+        telegram_chat_id=None,
         username=username,
         first_name=first_name,
         last_name=last_name,

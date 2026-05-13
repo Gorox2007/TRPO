@@ -15,6 +15,7 @@ class DatabaseError(Exception):
 class UserRecord:
     id: int
     telegram_id: int
+    telegram_chat_id: int | None
     username: str | None
     first_name: str | None
     last_name: str | None
@@ -57,6 +58,7 @@ class CandidateStats:
 @dataclass
 class ActionResult:
     action_type: str
+    actor: UserRecord
     target: UserRecord
     is_match: bool
 
@@ -568,7 +570,7 @@ class PostgresRepository:
                         is_match = True
             conn.commit()
 
-        return ActionResult(action_type=action_type, target=target, is_match=is_match)
+        return ActionResult(action_type=action_type, actor=actor, target=target, is_match=is_match)
 
     def recalculate_profile_completeness(self, user_id: int) -> float:
         query = """
@@ -647,6 +649,7 @@ class PostgresRepository:
         return f"""
             {alias}.id,
             {alias}.telegram_id,
+            {alias}.telegram_chat_id,
             {alias}.username,
             {alias}.first_name,
             {alias}.last_name,
@@ -667,23 +670,24 @@ class PostgresRepository:
 
     @staticmethod
     def _user_column_count() -> int:
-        return 14
+        return 15
 
     @staticmethod
     def _row_to_user(row: Any) -> UserRecord:
         return UserRecord(
             id=int(row[0]),
             telegram_id=int(row[1]),
-            username=row[2],
-            first_name=row[3],
-            last_name=row[4],
-            birth_date=None if row[5] is None else str(row[5]),
-            gender=row[6],
-            bio=row[7],
-            city=row[8],
-            profile_completeness=float(row[9]),
-            status=str(row[10]),
-            photo_count=int(row[11]),
-            created_at=str(row[12]),
-            updated_at=str(row[13]),
+            telegram_chat_id=None if row[2] is None else int(row[2]),
+            username=row[3],
+            first_name=row[4],
+            last_name=row[5],
+            birth_date=None if row[6] is None else str(row[6]),
+            gender=row[7],
+            bio=row[8],
+            city=row[9],
+            profile_completeness=float(row[10]),
+            status=str(row[11]),
+            photo_count=int(row[12]),
+            created_at=str(row[13]),
+            updated_at=str(row[14]),
         )

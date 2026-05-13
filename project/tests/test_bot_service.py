@@ -7,6 +7,28 @@ from stage2_bot.db import ActionResult, MatchRecord, UserRecord
 
 
 class BotServiceTests(unittest.TestCase):
+    def test_like_notifies_target_user(self) -> None:
+        actor_user = _make_user(1, 100001, first_name="Иван", username="ivan", telegram_chat_id=1000)
+        target_user = _make_user(2, 200002, first_name="Анна", username="anna", telegram_chat_id=2000)
+        core = FakeCore(
+            current_candidate_user_id=target_user.id,
+            action_result=ActionResult(action_type="like", actor=actor_user, target=target_user, is_match=False),
+        )
+        tg = FakeTelegramClient()
+        service = TelegramBotService(tg=tg, core=core)
+
+        service._cmd_reaction(chat_id=1000, telegram_id=100001, action_type="like")
+
+        self.assertEqual(core.reaction_calls, [(100001, target_user.id, "like")])
+        self.assertEqual(core.cleared_for, [100001])
+        self.assertEqual(core.current_candidate_sets, [(target_user.telegram_id, actor_user.id)])
+        self.assertEqual(len(tg.messages), 2)
+        self.assertEqual(tg.messages[0], (1000, "Лайк сохранен. Используйте /next для следующего кандидата."))
+        self.assertEqual(tg.messages[1][0], 2000)
+        self.assertIn("Вас лайкнули:", tg.messages[1][1])
+        self.assertIn("name: Иван", tg.messages[1][1])
+        self.assertIn("Ответьте /like", tg.messages[1][1])
+
     def test_prefs_rejects_removed_distance_filter(self) -> None:
         core = FakeCore()
         tg = FakeTelegramClient()
@@ -18,10 +40,11 @@ class BotServiceTests(unittest.TestCase):
         self.assertIn("distance больше не поддерживается", tg.messages[0][1])
 
     def test_like_uses_persisted_current_candidate_and_shows_contact(self) -> None:
-        target_user = _make_user(2, 200002, first_name="Анна", username="anna_match")
+        actor_user = _make_user(1, 100001, first_name="Иван", username="ivan_match", telegram_chat_id=1000)
+        target_user = _make_user(2, 200002, first_name="Анна", username="anna_match", telegram_chat_id=2000)
         core = FakeCore(
             current_candidate_user_id=target_user.id,
-            action_result=ActionResult(action_type="like", target=target_user, is_match=True),
+            action_result=ActionResult(action_type="like", actor=actor_user, target=target_user, is_match=True),
         )
         tg = FakeTelegramClient()
         service = TelegramBotService(tg=tg, core=core)
@@ -30,9 +53,14 @@ class BotServiceTests(unittest.TestCase):
 
         self.assertEqual(core.reaction_calls, [(100001, target_user.id, "like")])
         self.assertEqual(core.cleared_for, [100001])
-        self.assertEqual(len(tg.messages), 1)
+        self.assertEqual(len(tg.messages), 2)
+        self.assertEqual(tg.messages[0][0], 1000)
         self.assertIn("@anna_match", tg.messages[0][1])
         self.assertIn("https://t.me/anna_match", tg.messages[0][1])
+        self.assertEqual(tg.messages[1][0], 2000)
+        self.assertIn("@ivan_match", tg.messages[1][1])
+        self.assertIn("https://t.me/ivan_match", tg.messages[1][1])
+        self.assertEqual(core.current_candidate_sets, [])
 
     def test_matches_command_shows_contacts(self) -> None:
         match_with_contact = MatchRecord(
@@ -69,6 +97,7 @@ class FakeCore:
         self.matches = matches or []
         self.reaction_calls: list[tuple[int, int, str]] = []
         self.cleared_for: list[int] = []
+        self.current_candidate_sets: list[tuple[int, int | None]] = []
 
     def get_current_candidate_user_id(self, telegram_id: int) -> int | None:
         return self.current_candidate_user_id
@@ -81,6 +110,12 @@ class FakeCore:
     def clear_current_candidate(self, telegram_id: int) -> None:
         self.cleared_for.append(telegram_id)
         self.current_candidate_user_id = None
+
+    def set_current_candidate(self, telegram_id: int, candidate_user_id: int | None) -> None:
+        self.current_candidate_sets.append((telegram_id, candidate_user_id))
+
+    def list_photos_for_user_id(self, user_id: int, limit: int = 10) -> list[object]:
+        return []
 
     def list_matches(self, telegram_id: int, limit: int = 50) -> list[MatchRecord]:
         return self.matches
@@ -100,10 +135,12 @@ def _make_user(
     *,
     first_name: str,
     username: str | None,
+    telegram_chat_id: int | None = None,
 ) -> UserRecord:
     return UserRecord(
         id=user_id,
         telegram_id=telegram_id,
+        telegram_chat_id=telegram_chat_id,
         username=username,
         first_name=first_name,
         last_name=None,
